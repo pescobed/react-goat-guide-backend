@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import mysql from 'mysql2';
+import mysql from 'mysql2/promise';
 import cors from 'cors';
 
 // Route Imports
@@ -30,29 +30,30 @@ export const db = mysql.createPool({
   keepAliveInitialDelay: 0,
 });
 
-db.getConnection((err, connection) => {
-  if (err) {
-    console.error('Database connection failed:', err);
-  } else {
+// Test Database Connection via Promise
+db.getConnection()
+  .then((connection) => {
     console.log('Connected to MySQL!');
     connection.release();
-  }
-});
+  })
+  .catch((err) => {
+    console.error('Database connection failed:', err);
+  });
 
 /** 
  * PUBLIC ROUTES
  * Authentication handled within individual route files
  */
 app.use('/api/auth', authRoutes);
-app.use('/api/resources', resourceRoutes);  // ← REMOVED verifyAdmin from here
+app.use('/api/resources', resourceRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/suggestions', suggestionRoutes);
+
 /** 
  * PROTECTED ROUTES
- * All requests require authentication
  */
-
 app.use('/api/locations', verifyAdmin, locationRoutes);
+
 // Server Entry Point
 const PORT = process.env.PORT || 5000;
 app.listen(Number(PORT), '0.0.0.0', () => {

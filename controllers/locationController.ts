@@ -1,31 +1,30 @@
+import type { Request, Response } from 'express';
 import { db } from '../server.ts';
 
-// GET /api/locations — all unique locations
-export const getAllLocations = (req: any, res: any) => {
-  db.query(
-    `SELECT DISTINCT location FROM resources 
-     WHERE location IS NOT NULL AND location != ''
-     ORDER BY location`,
-    (err: any, results: any) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(results.map((r: any) => r.location));
-    }
-  );
+// GET /api/locations — all unique locations from new locations table
+export const getAllLocations = async (req: Request, res: Response) => {
+  try {
+    const [rows]: any = await db.query(`SELECT id, name FROM locations ORDER BY name ASC`);
+    return res.json(rows);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 };
 
 // GET /api/locations/:locationName — resources at that location
-export const getResourcesByLocation = (req: any, res: any) => {
-  const { locationName } = req.params;
-  db.query(
-    `SELECT id, resource_name, description, location,
-            phone, email, hours, cta_link, keywords
-     FROM resources
-     WHERE location = ?
-     ORDER BY resource_name`,
-    [decodeURIComponent(locationName)],
-    (err: any, results: any) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(results);
-    }
-  );
+export const getResourcesByLocation = async (req: Request, res: Response) => {
+  try {
+    const { locationName } = req.params;
+    const [results]: any = await db.query(
+      `SELECT id, resource_name, description, location, location_id,
+              phone, email, hours, cta_link, keywords
+       FROM resources
+       WHERE location = ? OR location_id = ?
+       ORDER BY resource_name`,
+      [decodeURIComponent(locationName), decodeURIComponent(locationName)]
+    );
+    return res.json(results);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 };
