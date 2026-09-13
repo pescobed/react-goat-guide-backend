@@ -6,12 +6,10 @@ import cors from 'cors';
 // Route Imports
 import departmentRoutes from './routes/departmentRoutes';
 import resourceRoutes from './routes/resourceRoutes';
+import buildingRoutes from './routes/buildingRoutes';
 import locationRoutes from './routes/locationRoutes';
 import authRoutes from './routes/authRoutes';
 import suggestionRoutes from './routes/suggestionRoutes';
-
-// Middleware Import
-import { verifyAdmin } from './utils/middleware';
 
 const app = express();
 
@@ -41,18 +39,15 @@ db.getConnection()
   });
 
 /** 
- * PUBLIC ROUTES
- * Authentication handled within individual route files
+ * API ROUTES
+ * Authentication & verification are handled internally per route file
  */
 app.use('/api/auth', authRoutes);
 app.use('/api/resources', resourceRoutes);
+app.use('/api/buildings', buildingRoutes);
+app.use('/api/locations', locationRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/suggestions', suggestionRoutes);
-
-/** 
- * PROTECTED ROUTES
- */
-app.use('/api/locations', verifyAdmin, locationRoutes);
 
 // Server Entry Point
 const PORT = process.env.PORT || 5000;
