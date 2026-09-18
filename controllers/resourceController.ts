@@ -35,33 +35,37 @@ export const getAdminStats = async (req: Request, res: Response) => {
 };
 
 // 3. ADMIN LIST: Paginated list for editable dashboard tables
-export const getAdminAll = async (req: Request, res: Response) => {
+export const getAdminAll = async (req: Request, res: Response): Promise<void> => {
   try {
     const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const limit = parseInt(req.query.limit as string) || 500; // Expanded capacity for dashboard listing
     const offset = (page - 1) * limit;
 
-    const [rows]: any = await db.query(
-      `SELECT id, resource_name, description, location, location_id, keywords, department_id, view_count 
-       FROM resources 
-       ORDER BY id DESC
-       LIMIT ? OFFSET ?`,
+    // Fetch paginated resources
+    const [resources]: any = await pool.query(
+      `SELECT * FROM resources ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
       [limit, offset]
     );
 
-    const [totalCount]: any = await db.query(`SELECT COUNT(*) as total FROM resources`);
+    // Compute total resources and global health stats independently of pagination window
+    const [[{ total }]]: any = await pool.query(`SELECT COUNT(*) AS total FROM resources`);
+    const [[{ incompleteCount }]]: any = await pool.query(
+      `SELECT COUNT(*) AS incompleteCount FROM resources WHERE name IS NULL OR description IS NULL OR name = '' OR description = ''`
+    );
 
-    return res.json({
-      data: rows,
-      pagination: {
-        total: totalCount[0].total,
+    res.json({
+      success: true,
+      data: resources,
+      meta: {
+        total,
+        incompleteCount,
         page,
         limit,
-        totalPages: Math.ceil(totalCount[0].total / limit)
+        totalPages: Math.ceil(total / limit)
       }
     });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
