@@ -38,3 +38,54 @@ export const getResourcesByLocation = async (req: Request, res: Response) => {
     return res.status(500).json({ error: err.message });
   }
 };
+
+// POST /api/locations - Create new room location
+export const createLocation = async (req: Request, res: Response) => {
+  try {
+    const { name, building_id, room_number } = req.body;
+    if (!name || !building_id) {
+      return res.status(400).json({ error: 'Name and building_id are required' });
+    }
+    const [result]: any = await db.query(
+      'INSERT INTO locations (name, building_id, room_number) VALUES (?, ?, ?)',
+      [name, building_id, room_number || null]
+    );
+    return res.status(201).json({ success: true, id: result.insertId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// PUT /api/locations/:id - Update location
+export const updateLocation = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, building_id, room_number } = req.body;
+    const [result]: any = await db.query(
+      'UPDATE locations SET name = ?, building_id = ?, room_number = ? WHERE id = ?',
+      [name, building_id || null, room_number || null, id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// DELETE /api/locations/:id - Delete location
+export const deleteLocation = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const [result]: any = await db.query('DELETE FROM locations WHERE id = ?', [id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+    return res.json({ success: true, message: 'Location deleted successfully' });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'Cannot delete location: Ensure no resources are currently assigned to it.',
+    });
+  }
+};

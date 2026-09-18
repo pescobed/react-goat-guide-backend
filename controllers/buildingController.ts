@@ -43,3 +43,54 @@ export const getLocationsByBuilding = async (req: Request, res: Response) => {
     return res.status(500).json({ error: err.message });
   }
 };
+
+// POST /api/buildings - Create new building
+export const createBuilding = async (req: Request, res: Response) => {
+  try {
+    const { building_name } = req.body;
+    if (!building_name) {
+      return res.status(400).json({ error: 'Building name is required' });
+    }
+    const [result]: any = await db.query(
+      'INSERT INTO buildings (building_name) VALUES (?)',
+      [building_name]
+    );
+    return res.status(201).json({ success: true, id: result.insertId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// PUT /api/buildings/:id - Update building
+export const updateBuilding = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { building_name } = req.body;
+    const [result]: any = await db.query(
+      'UPDATE buildings SET building_name = ? WHERE id = ?',
+      [building_name, id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Building not found' });
+    }
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+// DELETE /api/buildings/:id - Delete building
+export const deleteBuilding = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const [result]: any = await db.query('DELETE FROM buildings WHERE id = ?', [id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Building not found' });
+    }
+    return res.json({ success: true, message: 'Building deleted successfully' });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'Cannot delete building: Ensure no locations are linked to it.',
+    });
+  }
+};
