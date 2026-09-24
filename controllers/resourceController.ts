@@ -1,158 +1,316 @@
-import type { Request, Response } from 'express';
-import { db } from '../server.ts';
+import { Request, Response } from 'express';
+import db from '../config/db';
 
-// 1. PUBLIC: Get filtered resources for the main site
+/**
+ * Helper: Syncs tags for a given resource within a database transaction.
+ */
+async function syncResourceTags(connection: any, resourceId: number, tags: string[] | undefined) {
+  // Clear old tag mappings for this resource
+  await connection.query('DELETE FROM resource_tags WHERE resource_id = ?', [resourceId]);
+
+  if (!tags || !Array.isArray(tags) || tags.length === 0) return;
+
+  for (const rawTag of tags) {
+    const tagName = rawTag.trim().toLowerCase();
+    if (!tagName) continue;
+
+    // 1. Insert tag into master tags table if it doesn't already exist
+    await connection.query('INSERT IGNORE INTO tags (name) VALUES (?)', [tagName]);
+
+    // 2. Retrieve tag ID
+    const [[tagRow]]: any = await connection.query('SELECT id FROM tags WHERE name = ?', [tagName]);
+
+    // 3. Insert junction mapping
+    if (tagRow) {
+      await connection.query(
+        'INSERT IGNORE INTO resource_tags (resource_id, tag_id) VALUES (?, ?)',
+        [resourceId, tagRow.id]
+      );
+    }
+  }
+}
+
+/**
+ * GET /api/resources
+ * Fetches all resources with joined department names and comma-aggregated tags.
+ */
 export const getAllResources = async (req: Request, res: Response) => {
   try {
-    const [results]: any = await db.query(
-      `SELECT id, resource_name, description, location, location_id, keywords,
-              phone, email, socials, hours, cta_link, department_id, view_count
-       FROM resources 
-       WHERE resource_name IS NOT NULL AND resource_name != ''
-       AND description IS NOT NULL AND description != ''
-       ORDER BY view_count DESC, resource_name ASC`
-    );
-    return res.json(results);
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-};
-
-// 2. ADMIN STATS: Powers the dashboard top bar
-export const getAdminStats = async (req: Request, res: Response) => {
-  try {
-    const sql = `
+    const query = `
       SELECT 
-        (SELECT COUNT(*) FROM resources) as totalResources,
-        (SELECT IFNULL(SUM(view_count), 0) FROM resources) as totalViews,
-        (SELECT COUNT(*) FROM suggestions) as totalSuggestions
+        r.id,
+        r.resource_name,
+        r.description,
+        r.location,
+        r.phone,
+        r.email,
+        r.socials,
+        r.hours,
+        r.cta_link,
+        r.view_count,
+        d.id AS department_id,
+        d.name AS department_name,
+        GROUP_CONCAT(DISTINCT t.name ORDER BY t.name ASC SEPARATOR ',') AS tags
+      FROM resources r
+      LEFT JOIN departments d ON r.department_id = d.id
+      LEFT JOIN resource_tags rt ON r.id = rt.resource_id
+      LEFT JOIN tags t ON rt.tag_id = t.id
+      GROUP BY r.id
+      ORDER BY r.resource_name ASC
     `;
-    const [results]: any = await db.query(sql);
-    return res.json(results[0]);
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+
+    const [rows]: any = await db.query(query);
+
+    const resources = rows.map((row: any) => ({
+      ...row,
+      tags: row.tags ? row.tags.split(',') : []
+    }));
+
+    res.json({ success: true, data: resources });
+  } catch (error) {
+    console.error('Error fetching resources:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch resources' });
   }
 };
 
-// 3. ADMIN LIST: Paginated list for editable dashboard tables
-export const getAdminAll = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 500; // Expanded capacity for dashboard listing
-    const offset = (page - 1) * limit;
-
-    // Fetch paginated resources
-    const [resources]: any = await pool.query(
-      `SELECT * FROM resources ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
-      [limit, offset]
-    );
-
-    // Compute total resources and global health stats independently of pagination window
-    const [[{ total }]]: any = await pool.query(`SELECT COUNT(*) AS total FROM resources`);
-    const [[{ incompleteCount }]]: any = await pool.query(
-      `SELECT COUNT(*) AS incompleteCount FROM resources WHERE name IS NULL OR description IS NULL OR name = '' OR description = ''`
-    );
-
-    res.json({
-      success: true,
-      data: resources,
-      meta: {
-        total,
-        incompleteCount,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-export const getAdminResourcesView = getAdminAll;
-
-// 4. READ: Single Resource
+/**
+ * GET /api/resources/:id
+ * Fetches a single resource by ID with joined department and tag details.
+ */
 export const getResourceById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const [rows]: any = await db.query(`SELECT * FROM resources WHERE id = ?`, [id]);
-    if (!rows.length) return res.status(404).json({ error: 'Resource not found' });
-    return res.json(rows[0]);
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-};
 
-// 5. CREATE: Add New Resource
-export const createResource = async (req: Request, res: Response) => {
-  try {
-    const { 
-      resource_name, description, location, location_id, 
-      keywords, phone, email, socials, hours, cta_link, department_id 
-    } = req.body;
-
-    const sql = `
-      INSERT INTO resources 
-      (resource_name, description, location, location_id, keywords, phone, email, socials, hours, cta_link, department_id) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    const query = `
+      SELECT 
+        r.id,
+        r.resource_name,
+        r.description,
+        r.location,
+        r.phone,
+        r.email,
+        r.socials,
+        r.hours,
+        r.cta_link,
+        r.view_count,
+        d.id AS department_id,
+        d.name AS department_name,
+        GROUP_CONCAT(DISTINCT t.name ORDER BY t.name ASC SEPARATOR ',') AS tags
+      FROM resources r
+      LEFT JOIN departments d ON r.department_id = d.id
+      LEFT JOIN resource_tags rt ON r.id = rt.resource_id
+      LEFT JOIN tags t ON rt.tag_id = t.id
+      WHERE r.id = ?
+      GROUP BY r.id
     `;
-    const params = [
-      resource_name, description, location || null, location_id || null, 
-      keywords, phone, email, socials, hours, cta_link, department_id || null
-    ];
 
-    const [result]: any = await db.query(sql, params);
-    return res.status(201).json({ success: true, id: result.insertId });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    const [rows]: any = await db.query(query, [id]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Resource not found' });
+    }
+
+    const resource = {
+      ...rows[0],
+      tags: rows[0].tags ? rows[0].tags.split(',') : []
+    };
+
+    res.json({ success: true, data: resource });
+  } catch (error) {
+    console.error('Error fetching resource:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch resource' });
   }
 };
 
-// 6. UPDATE: Edit Resource
-export const updateResource = async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { 
-      resource_name, description, location, location_id, 
-      keywords, phone, email, socials, hours, cta_link, department_id 
-    } = req.body;
+/**
+ * POST /api/resources
+ * Creates a new resource and links its tags.
+ */
+export const createResource = async (req: Request, res: Response) => {
+  const {
+    resource_name,
+    description,
+    location,
+    phone,
+    email,
+    socials,
+    hours,
+    cta_link,
+    department_id,
+    tags
+  } = req.body;
 
-    const sql = `
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const insertQuery = `
+      INSERT INTO resources 
+        (resource_name, description, location, phone, email, socials, hours, cta_link, department_id, view_count) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `;
+
+    const [result]: any = await connection.query(insertQuery, [
+      resource_name,
+      description,
+      location,
+      phone,
+      email,
+      socials,
+      hours,
+      cta_link,
+      department_id || null
+    ]);
+
+    const newResourceId = result.insertId;
+
+    // Sync tags for newly created resource
+    await syncResourceTags(connection, newResourceId, tags);
+
+    await connection.commit();
+    res.status(201).json({ success: true, message: 'Resource created successfully', id: newResourceId });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error creating resource:', error);
+    res.status(500).json({ success: false, message: 'Failed to create resource' });
+  } finally {
+    connection.release();
+  }
+};
+
+/**
+ * PUT /api/resources/:id
+ * Updates an existing resource and updates tag associations.
+ */
+export const updateResource = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const {
+    resource_name,
+    description,
+    location,
+    phone,
+    email,
+    socials,
+    hours,
+    cta_link,
+    department_id,
+    tags
+  } = req.body;
+
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const updateQuery = `
       UPDATE resources 
-      SET resource_name = ?, description = ?, location = ?, location_id = ?, 
-          keywords = ?, phone = ?, email = ?, socials = ?, hours = ?, cta_link = ?, department_id = ?
+      SET 
+        resource_name = ?, 
+        description = ?, 
+        location = ?, 
+        phone = ?, 
+        email = ?, 
+        socials = ?, 
+        hours = ?, 
+        cta_link = ?, 
+        department_id = ?
       WHERE id = ?
     `;
-    const params = [
-      resource_name, description, location || null, location_id || null, 
-      keywords, phone, email, socials, hours, cta_link, department_id || null, id
-    ];
 
-    await db.query(sql, params);
-    return res.json({ success: true });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    await connection.query(updateQuery, [
+      resource_name,
+      description,
+      location,
+      phone,
+      email,
+      socials,
+      hours,
+      cta_link,
+      department_id || null,
+      id
+    ]);
+
+    // Sync tag associations
+    await syncResourceTags(connection, id, tags);
+
+    await connection.commit();
+    res.json({ success: true, message: 'Resource updated successfully' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error updating resource:', error);
+    res.status(500).json({ success: false, message: 'Failed to update resource' });
+  } finally {
+    connection.release();
   }
 };
 
-// 7. DELETE: Remove Resource
+/**
+ * DELETE /api/resources/:id
+ * Deletes a resource (foreign keys handle clearing resource_tags via ON DELETE CASCADE).
+ */
 export const deleteResource = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await db.query(`DELETE FROM resources WHERE id = ?`, [id]);
-    return res.json({ success: true });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+
+    const [result]: any = await db.query('DELETE FROM resources WHERE id = ?', [id]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'Resource not found' });
+    }
+
+    res.json({ success: true, message: 'Resource deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting resource:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete resource' });
   }
 };
 
-// 8. PUBLIC: Utility
+/**
+ * PATCH /api/resources/:id/view
+ * Increments view count for analytics.
+ */
 export const incrementViewCount = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await db.query(`UPDATE resources SET view_count = view_count + 1 WHERE id = ?`, [id]);
-    return res.json({ success: true });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    await db.query('UPDATE resources SET view_count = view_count + 1 WHERE id = ?', [id]);
+    res.json({ success: true, message: 'View count updated' });
+  } catch (error) {
+    console.error('Error incrementing view count:', error);
+    res.status(500).json({ success: false, message: 'Failed to increment view count' });
   }
+};
+
+/**
+ * GET /api/resources/admin/stats
+ * Fetches dashboard summary statistics.
+ */
+export const getAdminStats = async (req: Request, res: Response) => {
+  try {
+    const [[{ total_resources }]]: any = await db.query('SELECT COUNT(*) AS total_resources FROM resources');
+    const [[{ total_views }]]: any = await db.query('SELECT SUM(view_count) AS total_views FROM resources');
+    const [[{ total_departments }]]: any = await db.query('SELECT COUNT(*) AS total_departments FROM departments');
+    const [[{ total_tags }]]: any = await db.query('SELECT COUNT(*) AS total_tags FROM tags');
+
+    res.json({
+      success: true,
+      data: {
+        total_resources,
+        total_views: total_views || 0,
+        total_departments,
+        total_tags
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching admin stats:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch admin stats' });
+  }
+};
+
+/**
+ * GET /api/resources/admin/all
+ * Returns full administrative detail list.
+ */
+export const getAdminAll = async (req: Request, res: Response) => {
+  return getAllResources(req, res);
 };
