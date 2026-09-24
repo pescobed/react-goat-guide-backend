@@ -4,7 +4,7 @@ import {
   createSuggestion, 
   getSuggestions, 
   deleteSuggestion 
-} from '../controllers/suggestionController.ts';
+} from '../controllers/suggestionController';
 
 const router = Router();
 

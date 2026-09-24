@@ -10,7 +10,7 @@ import {
   incrementViewCount,
   getAdminStats,
   getAdminAll
-} from '../controllers/resourceController.ts';
+} from '../controllers/resourceController';
 
 const router = Router();
 

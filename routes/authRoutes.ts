@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { login } from '../controllers/authController.ts';
+import { login } from '../controllers/authController';
 import { getAdminStats, getAdminAll } from '../controllers/resourceController.ts';
 import { verifyAdmin } from '../utils/middleware.ts';
 
