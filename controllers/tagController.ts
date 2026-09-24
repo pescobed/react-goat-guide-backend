@@ -1,55 +1,64 @@
 import { Request, Response } from 'express';
-import pool from '../config/db';
+import db from '../config/db';
 
-export const getTags = async (req: Request, res: Response): Promise<void> => {
+/**
+ * GET /api/tags
+ * Fetches all master tags with resource counts.
+ */
+export const getAllTags = async (req: Request, res: Response) => {
   try {
-    const [rows] = await pool.query(`
-      SELECT t.*, COUNT(rt.resource_id) AS resource_count
+    const query = `
+      SELECT 
+        t.id, 
+        t.name, 
+        COUNT(rt.resource_id) AS resource_count 
       FROM tags t
       LEFT JOIN resource_tags rt ON t.id = rt.tag_id
       GROUP BY t.id
       ORDER BY t.name ASC
-    `);
-    res.json({ success: true, data: rows });
+    `;
+
+    const [tags]: any = await db.query(query);
+    res.json({ success: true, data: tags });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to fetch tags', error });
+    console.error('Error fetching tags:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch tags' });
   }
 };
 
-export const createTag = async (req: Request, res: Response): Promise<void> => {
-  const { name, slug } = req.body;
-  if (!name || !slug) {
-    res.status(400).json({ success: false, message: 'Name and slug are required' });
-    return;
-  }
+/**
+ * GET /api/tags/:name/resources
+ * Fetches all resources associated with a given tag name.
+ */
+export const getResourcesByTag = async (req: Request, res: Response) => {
   try {
-    const [result]: any = await pool.query(
-      'INSERT INTO tags (name, slug) VALUES (?, ?)',
-      [name, slug]
-    );
-    res.status(201).json({ success: true, id: result.insertId, name, slug });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+    const { name } = req.params;
 
-export const updateTag = async (req: Request, res: Response): Promise<void> => {
-  const { id } = req.params;
-  const { name, slug } = req.body;
-  try {
-    await pool.query('UPDATE tags SET name = ?, slug = ? WHERE id = ?', [name, slug, id]);
-    res.json({ success: true, message: 'Tag updated' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+    const query = `
+      SELECT 
+        r.id,
+        r.resource_name,
+        r.description,
+        r.location,
+        r.phone,
+        r.email,
+        r.socials,
+        r.hours,
+        r.cta_link,
+        r.view_count,
+        d.name AS department_name
+      FROM resources r
+      JOIN resource_tags rt ON r.id = rt.resource_id
+      JOIN tags t ON rt.tag_id = t.id
+      LEFT JOIN departments d ON r.department_id = d.id
+      WHERE LOWER(t.name) = LOWER(?)
+      ORDER BY r.resource_name ASC
+    `;
 
-export const deleteTag = async (req: Request, res: Response): Promise<void> => {
-  const { id } = req.params;
-  try {
-    await pool.query('DELETE FROM tags WHERE id = ?', [id]);
-    res.json({ success: true, message: 'Tag deleted' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+    const [resources]: any = await db.query(query, [name]);
+    res.json({ success: true, data: resources });
+  } catch (error) {
+    console.error('Error fetching resources for tag:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch resources for tag' });
   }
 };
