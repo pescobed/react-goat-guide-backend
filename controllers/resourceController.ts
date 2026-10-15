@@ -1,5 +1,5 @@
-import { Request, Response } from 'express';
-import db from '../config/db';
+import type { Request, Response } from 'express';
+import { db } from '../server.ts';
 
 /**
  * Helper: Syncs tags for a given resource within a database transaction.

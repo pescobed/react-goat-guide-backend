@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import db from '../config/db';
+import { db } from '../server.ts';
 
 /**
  * GET /api/tags
- * Fetches all master tags with resource counts.
+ * Fetches all master tags with resource counts and slugs.
  */
 export const getAllTags = async (req: Request, res: Response) => {
   try {
@@ -11,15 +11,23 @@ export const getAllTags = async (req: Request, res: Response) => {
       SELECT 
         t.id, 
         t.name, 
+        t.slug,
         COUNT(rt.resource_id) AS resource_count 
       FROM tags t
       LEFT JOIN resource_tags rt ON t.id = rt.tag_id
-      GROUP BY t.id
+      GROUP BY t.id, t.name, t.slug
       ORDER BY t.name ASC
     `;
 
     const [tags]: any = await db.query(query);
-    res.json({ success: true, data: tags });
+
+    // Deduplicate by case-insensitive tag name as a safety fallback
+    const uniqueTags = tags.filter(
+      (tag: any, index: number, self: any[]) =>
+        index === self.findIndex((item) => item.name.toLowerCase() === tag.name.toLowerCase())
+    );
+
+    res.json({ success: true, data: uniqueTags });
   } catch (error) {
     console.error('Error fetching tags:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch tags' });
@@ -28,7 +36,7 @@ export const getAllTags = async (req: Request, res: Response) => {
 
 /**
  * GET /api/tags/:name/resources
- * Fetches all resources associated with a given tag name.
+ * Fetches all resources associated with a given tag name or tag slug.
  */
 export const getResourcesByTag = async (req: Request, res: Response) => {
   try {
@@ -51,11 +59,11 @@ export const getResourcesByTag = async (req: Request, res: Response) => {
       JOIN resource_tags rt ON r.id = rt.resource_id
       JOIN tags t ON rt.tag_id = t.id
       LEFT JOIN departments d ON r.department_id = d.id
-      WHERE LOWER(t.name) = LOWER(?)
+      WHERE LOWER(t.name) = LOWER(?) OR LOWER(t.slug) = LOWER(?)
       ORDER BY r.resource_name ASC
     `;
 
-    const [resources]: any = await db.query(query, [name]);
+    const [resources]: any = await db.query(query, [name, name]);
     res.json({ success: true, data: resources });
   } catch (error) {
     console.error('Error fetching resources for tag:', error);
