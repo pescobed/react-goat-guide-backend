@@ -1,21 +1,48 @@
 import type { Request, Response } from 'express';
 import { db } from '../server.ts';
 
-// GET /api/locations — all locations linked to their parent building
+// GET /api/locations — Returns buildings as top-level categories with nested rooms/locations
 export const getAllLocations = async (req: Request, res: Response) => {
   try {
     const [rows]: any = await db.query(`
       SELECT 
-        l.id, 
-        l.name, 
-        l.room_number, 
-        b.id AS building_id, 
-        b.building_name
-      FROM locations l
-      LEFT JOIN buildings b ON l.building_id = b.id
+        b.id AS building_id,
+        b.building_name,
+        l.id AS location_id,
+        l.name AS location_name,
+        l.room_number,
+        COUNT(r.id) AS resource_count
+      FROM buildings b
+      LEFT JOIN locations l ON b.id = l.building_id
+      LEFT JOIN resources r ON (r.location_id = l.id OR r.building_id = b.id)
+      GROUP BY b.id, l.id
       ORDER BY b.building_name ASC, l.room_number ASC
     `);
-    return res.json(rows);
+
+    // Group rows into a Building -> Rooms hierarchy
+    const buildingMap = new Map();
+
+    for (const row of rows) {
+      if (!buildingMap.has(row.building_id)) {
+        buildingMap.set(row.building_id, {
+          id: row.building_id,
+          building_name: row.building_name,
+          rooms: []
+        });
+      }
+
+      // If this building has a specific room associated with it
+      if (row.location_id) {
+        buildingMap.get(row.building_id).rooms.push({
+          id: row.location_id,
+          name: row.location_name,
+          room_number: row.room_number,
+          resource_count: row.resource_count
+        });
+      }
+    }
+
+    return res.json(Array.from(buildingMap.values()));
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
